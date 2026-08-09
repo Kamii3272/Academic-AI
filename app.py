@@ -15,12 +15,12 @@ st.set_page_config(
     page_title="Academic Gap Finder", page_icon="🎓", layout="wide"
 )
 
-# Кастомный академический CSS-стиль (минимум пестроты, чистые шрифты)
+# Кастомный академический CSS-стиль
 st.markdown(
     """
     <style>
     .main-title {
-        font_family: 'Inter', sans-serif;
+        font-family: 'Inter', sans-serif;
         font-weight: 700;
         font-size: 2.2rem;
         color: #1E293B;
@@ -147,11 +147,12 @@ if st.button("Начать аналитический поиск", type="primary
                     {"Вектор": labels, "Доля (%)": shares}
                 )
 
+                # Используем надёжную цепочку явных HEX-цветов
                 fig_pie = px.pie(
                     pie_data,
                     names="Вектор",
                     values="Доля (%)",
-                    color_discrete_sequence=px.colors.sequential.Slate,
+                    color_discrete_sequence=["#0F172A", "#334155", "#64748B"],
                     hole=0.35,
                 )
                 fig_pie.update_traces(textinfo="percent+label")
