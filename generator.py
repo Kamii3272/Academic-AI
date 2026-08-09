@@ -1,11 +1,10 @@
 import requests
+import streamlit as st
 from config import DEFAULT_LLM_MODEL, OPENAI_API_KEY
 
 
 def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
-    """
-    Формирует строгий академический промпт для LLM.
-    """
+    """Формирует академический промпт для LLM."""
     context = ""
     for i, art in enumerate(articles, 1):
         abstract_text = (
@@ -39,44 +38,54 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
 
 
 def generate_topics(user_query: str, articles: list[dict]) -> str:
-    """
-    Отправляет промпт напрямую в Google Gemini API через REST.
-    """
+    """Отправляет запрос в Google Gemini API через заголовок x-goog-api-key."""
     prompt = build_analysis_prompt(user_query, articles)
 
-    if not OPENAI_API_KEY:
-        return (
-            "⚠️ API-ключ не найден в настройках!\n\n"
-            "Пожалуйста, проверьте Secrets в Streamlit."
-        )
+    # Приоритетно берем ключ из Secrets Streamlit, затем из config
+    api_key = ""
+    try:
+        if "OPENAI_API_KEY" in st.secrets:
+            api_key = st.secrets["OPENAI_API_KEY"]
+        else:
+            api_key = OPENAI_API_KEY
+    except Exception:
+        api_key = OPENAI_API_KEY
 
-    # Прямой адрес API Google с передачей ключа в URL
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{DEFAULT_LLM_MODEL}:generateContent?key={OPENAI_API_KEY}"
+    if not api_key:
+        return "⚠️ API-ключ не найден в настройках Secrets Streamlit!"
+
+    # Прямой адрес API
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{DEFAULT_LLM_MODEL}:generateContent"
+
+    # Явная авторизация через заголовок x-goog-api-key
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key.strip(),
+    }
 
     payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": prompt}]
-            }
-        ],
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "systemInstruction": {
-            "parts": [{"text": "Ты — ведущий академический эксперт и научный руководитель."}]
+            "parts": [
+                {
+                    "text": "Ты — ведущий академический эксперт и научный руководитель."
+                }
+            ]
         },
-        "generationConfig": {
-            "temperature": 0.7
-        }
+        "generationConfig": {"temperature": 0.7},
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=60)
+        response = requests.post(
+            url, headers=headers, json=payload, timeout=60
+        )
         data = response.json()
 
         if response.status_code == 200:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
             error_msg = data.get("error", {}).get("message", response.text)
-            return f"❌ Ошибка при обращении к Gemini API: {error_msg}"
+            return f"❌ Ошибка при обращении к Gemini API ({response.status_code}): {error_msg}"
 
     except Exception as e:
         return f"❌ Ошибка сети при обращении к Gemini API: {e}"
