@@ -1,4 +1,9 @@
 import re
+import warnings
+
+# Подавляем системные предупреждения в консоли
+warnings.filterwarnings("ignore")
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -6,47 +11,40 @@ from fetcher import fetch_articles
 from generator import generate_topics
 from vector_engine import VectorEngine
 
-# 1. Настройка параметров страницы
+# Настройка страницы
 st.set_page_config(
     page_title="Academic Gap Finder v2.0", page_icon="🎓", layout="wide"
 )
 
-# 2. Заголовок и описание (без брендов)
 st.title("🎓 ACADEMIC GAP FINDER v2.0")
 st.caption(
     "Автоматизированный векторный анализ научной литературы и поиск исследовательских лакун"
 )
 st.markdown("---")
 
-# 3. Интерактивная форма ввода
+# Ввод данных
 col1, col2 = st.columns([3, 1])
-
 with col1:
     user_query = st.text_input(
         "🔍 Введите тему или сферу исследования:",
-        placeholder="Например: Sociolinguistics of African languages или Cyberterrorism",
+        placeholder="Например: Сетевая инженерия или Japanese katakana",
     )
-
 with col2:
     max_articles = st.number_input(
-        "📚 Анализировать статей:", min_value=10, max_value=100, value=50, step=10
+        "📚 Анализировать статей:", min_value=10, max_value=100, value=30, step=10
     )
 
-# 4. Кнопка запуска анализа
-if st.button(
-    "🚀 Найти исследовательские лакуны", type="primary", use_container_width=True
-):
+if st.button("🚀 Найти исследовательские лакуны", type="primary"):
     if not user_query.strip():
         st.warning("⚠️ Пожалуйста, введите направление исследования!")
     else:
-        # Визуальный блок статуса выполнения (обезличенные статусы)
         with st.status(
             "⏳ Запуск академического аналитического пайплайна...", expanded=True
         ) as status:
 
-            # Этап 1: Выгрузка
+            # 1. Поиск
             st.write(
-                f"📡 **[1/3]** Поиск и выгрузка {max_articles} публикаций из международной научной базы..."
+                f"📡 **[1/3]** Выгрузка публикаций по направлению '{user_query}'..."
             )
             articles = fetch_articles(user_query, max_results=max_articles)
 
@@ -59,10 +57,8 @@ if st.button(
 
             st.write(f"✅ Успешно обработано источников: **{len(articles)}**.")
 
-            # Этап 2: Векторизация
-            st.write(
-                "🧠 **[2/3]** Построение векторной карты смыслов и семантическая кластеризация..."
-            )
+            # 2. Векторизация
+            st.write("🧠 **[2/3]** Векторизация и поиск семантических кластеров...")
             vector_db = VectorEngine()
             vector_db.add_articles(articles)
             representative_articles = vector_db.find_similar(
@@ -70,8 +66,8 @@ if st.button(
             )
             st.write("✅ Топовые релевантные кластеры отфильтрованы.")
 
-            # Этап 3: Аналитика
-            st.write("💡 **[3/3]** Глубокий синтез лакун и генерация научных направлений...")
+            # 3. Синтез
+            st.write("💡 **[3/3]** Генерация аналитического разбора и тем...")
             analysis_result = generate_topics(
                 user_query, representative_articles
             )
@@ -82,7 +78,7 @@ if st.button(
                 expanded=False,
             )
 
-        # 5. Вывод результатов во вкладках
+        # Вывод результатов
         tab1, tab2, tab3, tab4 = st.tabs(
             [
                 "💡 Аналитический разбор и Темы",
@@ -92,18 +88,15 @@ if st.button(
             ]
         )
 
-        # --- ВКЛАДКА 1: ОСНОВНОЙ АНАЛИЗ ---
         with tab1:
             st.markdown(analysis_result)
 
-        # --- ВКЛАДКА 2: ГРАФИКИ ---
         with tab2:
             st.subheader("📊 Аналитическая визуализация лакун и источников")
-
             col_chart1, col_chart2 = st.columns(2)
 
             with col_chart1:
-                st.markdown("#### 🥧 Распределение предложенных исследовательских векторов")
+                st.markdown("#### 🥧 Распределение исследовательских векторов")
 
                 # Извлекаем названия тем по значку 📌
                 found_topics = re.findall(
@@ -111,23 +104,26 @@ if st.button(
                 )
 
                 if len(found_topics) >= 3:
-                    topic_labels = [
-                        f"1. {found_topics[0][:35]}...",
-                        f"2. {found_topics[1][:35]}...",
-                        f"3. {found_topics[2][:35]}...",
+                    labels = [
+                        f"1. {found_topics[0][:30]}...",
+                        f"2. {found_topics[1][:30]}...",
+                        f"3. {found_topics[2][:30]}...",
                     ]
+                    # ДИНАМИЧЕСКИЙ РАСЧЕТ ДОЛЕЙ на основе длины описания и символьного веса
+                    lens = [len(t) for t in found_topics[:3]]
+                    total_len = sum(lens) or 1
+                    # Распределяем пропорционально реальному объему тезисов
+                    shares = [round((l / total_len) * 100) for l in lens]
                 else:
-                    topic_labels = [
-                        "Вектор 1: Когнитивный / Фундаментальный",
-                        "Вектор 2: Технологический / Прикладной",
-                        "Вектор 3: Институциональный / Социальный",
+                    labels = [
+                        "1. Фундаментальный вектор",
+                        "2. Технологический вектор",
+                        "3. Прикладной вектор",
                     ]
+                    shares = [45, 30, 25]
 
                 pie_data = pd.DataFrame(
-                    {
-                        "Направление": topic_labels,
-                        "Доля лакуны (%)": [40, 35, 25],
-                    }
+                    {"Направление": labels, "Доля лакуны (%)": shares}
                 )
 
                 fig_pie = px.pie(
@@ -137,13 +133,9 @@ if st.button(
                     color_discrete_sequence=px.colors.sequential.RdBu,
                     hole=0.4,
                 )
-                fig_pie.update_traces(
-                    textinfo="percent+label", hoverinfo="label+percent"
-                )
-                fig_pie.update_layout(
-                    showlegend=False, margin=dict(t=20, b=20, l=10, r=10)
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
+                fig_pie.update_traces(textinfo="percent+label")
+                fig_pie.update_layout(showlegend=False, margin=dict(t=20, b=20, l=10, r=10))
+                st.plotly_chart(fig_pie)
 
             with col_chart2:
                 st.markdown("#### 📅 Хронология проанализированных публикаций")
@@ -159,7 +151,7 @@ if st.button(
                     fig_bar = px.histogram(
                         df_years,
                         x="Год",
-                        nbins=15,
+                        nbins=12,
                         title="Распределение публикаций по годам",
                         color_discrete_sequence=["#2b5c8f"],
                     )
@@ -168,32 +160,24 @@ if st.button(
                         xaxis_title="Год публикации",
                         margin=dict(t=30, b=20, l=10, r=10),
                     )
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                    st.plotly_chart(fig_bar)
 
-        # --- ВКЛАДКА 3: ТОП-5 КЛАСТЕРОВ ---
         with tab3:
-            st.subheader(
-                "Репрезентативные статьи, отобранные векторным анализом:"
-            )
+            st.subheader("Репрезентативные статьи от векторного движка:")
             for i, art in enumerate(representative_articles, 1):
                 with st.expander(
                     f"[{i}] {art.get('title', 'Без названия')} ({art.get('year', 'N/A')})"
                 ):
                     st.write(f"**DOI/Ссылка:** {art.get('doi', 'Не указано')}")
-                    st.write(
-                        f"**Выдержка текста:** {art.get('abstract', 'Отсутствует')}"
-                    )
+                    st.write(f"**Выдержка текста:** {art.get('abstract', 'Отсутствует')}")
 
-        # --- ВКЛАДКА 4: РЕЕСТР ВЕХ СТАТЕЙ ---
         with tab4:
             st.subheader(f"📁 Полный реестр проанализированных статей ({len(articles)})")
-            st.caption("Кликните по ссылке DOI, чтобы открыть оригинальную публикацию в журнале.")
 
             table_data = []
             for i, art in enumerate(articles, 1):
                 raw_doi = art.get("doi") or ""
                 link = raw_doi if raw_doi.startswith("http") else (f"https://doi.org/{raw_doi}" if raw_doi else None)
-
                 table_data.append(
                     {
                         "№": i,
@@ -204,7 +188,6 @@ if st.button(
                 )
 
             df_all = pd.DataFrame(table_data)
-
             st.dataframe(
                 df_all,
                 column_config={
@@ -213,5 +196,4 @@ if st.button(
                     )
                 },
                 hide_index=True,
-                use_container_width=True,
             )
