@@ -1,7 +1,6 @@
 import re
 import warnings
 
-# Подавляем системные предупреждения в консоли
 warnings.filterwarnings("ignore")
 
 import pandas as pd
@@ -11,7 +10,6 @@ from fetcher import fetch_articles
 from generator import generate_topics
 from vector_engine import VectorEngine
 
-# Настройка страницы
 st.set_page_config(
     page_title="Academic Gap Finder v2.0", page_icon="🎓", layout="wide"
 )
@@ -22,7 +20,6 @@ st.caption(
 )
 st.markdown("---")
 
-# Ввод данных
 col1, col2 = st.columns([3, 1])
 with col1:
     user_query = st.text_input(
@@ -42,9 +39,8 @@ if st.button("🚀 Найти исследовательские лакуны", 
             "⏳ Запуск академического аналитического пайплайна...", expanded=True
         ) as status:
 
-            # 1. Поиск
             st.write(
-                f"📡 **[1/3]** Выгрузка публикаций по направлению '{user_query}'..."
+                f"📡 **[1/3]** Выгрузка точных публикаций по запросу '{user_query}'..."
             )
             articles = fetch_articles(user_query, max_results=max_articles)
 
@@ -55,9 +51,8 @@ if st.button("🚀 Найти исследовательские лакуны", 
                 st.error("По вашему запросу не найдено подходящих публикаций.")
                 st.stop()
 
-            st.write(f"✅ Успешно обработано источников: **{len(articles)}**.")
+            st.write(f"✅ Успешно обработано точных источников: **{len(articles)}**.")
 
-            # 2. Векторизация
             st.write("🧠 **[2/3]** Векторизация и поиск семантических кластеров...")
             vector_db = VectorEngine()
             vector_db.add_articles(articles)
@@ -66,7 +61,6 @@ if st.button("🚀 Найти исследовательские лакуны", 
             )
             st.write("✅ Топовые релевантные кластеры отфильтрованы.")
 
-            # 3. Синтез
             st.write("💡 **[3/3]** Генерация аналитического разбора и тем...")
             analysis_result = generate_topics(
                 user_query, representative_articles
@@ -78,7 +72,6 @@ if st.button("🚀 Найти исследовательские лакуны", 
                 expanded=False,
             )
 
-        # Вывод результатов
         tab1, tab2, tab3, tab4 = st.tabs(
             [
                 "💡 Аналитический разбор и Темы",
@@ -98,7 +91,6 @@ if st.button("🚀 Найти исследовательские лакуны", 
             with col_chart1:
                 st.markdown("#### 🥧 Распределение исследовательских векторов")
 
-                # Извлекаем названия тем по значку 📌
                 found_topics = re.findall(
                     r"📌\s*(?:Тема \d+:?\s*)?([^\n]+)", analysis_result
                 )
@@ -109,10 +101,8 @@ if st.button("🚀 Найти исследовательские лакуны", 
                         f"2. {found_topics[1][:30]}...",
                         f"3. {found_topics[2][:30]}...",
                     ]
-                    # ДИНАМИЧЕСКИЙ РАСЧЕТ ДОЛЕЙ на основе длины описания и символьного веса
                     lens = [len(t) for t in found_topics[:3]]
                     total_len = sum(lens) or 1
-                    # Распределяем пропорционально реальному объему тезисов
                     shares = [round((l / total_len) * 100) for l in lens]
                 else:
                     labels = [
@@ -168,7 +158,9 @@ if st.button("🚀 Найти исследовательские лакуны", 
                 with st.expander(
                     f"[{i}] {art.get('title', 'Без названия')} ({art.get('year', 'N/A')})"
                 ):
-                    st.write(f"**DOI/Ссылка:** {art.get('doi', 'Не указано')}")
+                    raw_doi = art.get("doi") or ""
+                    link_text = raw_doi if raw_doi.startswith("http") else (f"https://doi.org/{raw_doi}" if raw_doi else "Ссылка отсутствует")
+                    st.write(f"**DOI/Ссылка:** {link_text}")
                     st.write(f"**Выдержка текста:** {art.get('abstract', 'Отсутствует')}")
 
         with tab4:
@@ -177,17 +169,23 @@ if st.button("🚀 Найти исследовательские лакуны", 
             table_data = []
             for i, art in enumerate(articles, 1):
                 raw_doi = art.get("doi") or ""
-                link = raw_doi if raw_doi.startswith("http") else (f"https://doi.org/{raw_doi}" if raw_doi else None)
+                # Если ссылки нет, ставим None (чистая ячейка), иначе проверяем формат
+                valid_link = None
+                if raw_doi:
+                    valid_link = raw_doi if raw_doi.startswith("http") else f"https://doi.org/{raw_doi}"
+
                 table_data.append(
                     {
                         "№": i,
                         "Год": art.get("year", "N/A"),
                         "Название статьи": art.get("title", "Без названия"),
-                        "DOI / Ссылка": link,
+                        "DOI / Ссылка": valid_link,
                     }
                 )
 
             df_all = pd.DataFrame(table_data)
+
+            # Отключаем выделение ячеек (on_select="ignore"), чтобы избежать зависания и плавающих подсказок
             st.dataframe(
                 df_all,
                 column_config={
@@ -196,4 +194,5 @@ if st.button("🚀 Найти исследовательские лакуны", 
                     )
                 },
                 hide_index=True,
+                on_select="ignore",
             )
