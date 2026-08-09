@@ -1,3 +1,4 @@
+import requests
 from config import DEFAULT_LLM_MODEL, OPENAI_API_KEY
 
 
@@ -39,39 +40,43 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
 
 def generate_topics(user_query: str, articles: list[dict]) -> str:
     """
-    Отправляет промпт напрямую в Google Gemini API.
+    Отправляет промпт напрямую в Google Gemini API через REST.
     """
     prompt = build_analysis_prompt(user_query, articles)
 
-    if not OPENAI_API_KEY or OPENAI_API_KEY == "AIzaSy...":
+    if not OPENAI_API_KEY:
         return (
-            "⚠️ API-ключ Google не найден в config.py!\n\n"
-            "Пожалуйста, вставьте ваш API-ключ от Google AI Studio в config.py.\n\n"
-            "--- СФОРМИРОВАННЫЙ ПРОМПТ ---\n" + prompt[:500] + "..."
+            "⚠️ API-ключ не найден в настройках!\n\n"
+            "Пожалуйста, проверьте Secrets в Streamlit."
         )
 
-    from openai import OpenAI
+    # Прямой адрес API Google с передачей ключа в URL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{DEFAULT_LLM_MODEL}:generateContent?key={OPENAI_API_KEY}"
 
-    # Официальный шлюз Google Gemini для совместимости с OpenAI библиотекой
-    client = OpenAI(
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        api_key=OPENAI_API_KEY,
-    )
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "systemInstruction": {
+            "parts": [{"text": "Ты — ведущий академический эксперт и научный руководитель."}]
+        },
+        "generationConfig": {
+            "temperature": 0.7
+        }
+    }
 
     try:
-        print(f"🤖 Запрашиваем генерацию у Google Gemini [{DEFAULT_LLM_MODEL}]...")
-        response = client.chat.completions.create(
-            model=DEFAULT_LLM_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Ты — ведущий академический эксперт и научный руководитель.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.7,
-        )
-        return response.choices[0].message.content
+        response = requests.post(url, json=payload, timeout=60)
+        data = response.json()
+
+        if response.status_code == 200:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            error_msg = data.get("error", {}).get("message", response.text)
+            return f"❌ Ошибка при обращении к Gemini API: {error_msg}"
 
     except Exception as e:
-        return f"❌ Ошибка при обращении к Gemini API: {e}"
+        return f"❌ Ошибка сети при обращении к Gemini API: {e}"
