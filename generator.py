@@ -1,7 +1,6 @@
 import requests
 import streamlit as st
 
-# Модели Gemini для проверки
 GEMINI_MODELS = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
@@ -9,7 +8,7 @@ GEMINI_MODELS = [
 
 
 def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
-    """Формирует сжатый академический промпт."""
+    """Формирует академический промпт с запросом глубокой структуры темы."""
     context = ""
     for i, art in enumerate(articles, 1):
         abstract_text = (
@@ -25,7 +24,7 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
         context += f"\n--- Статья {i} ---\nНазвание: {title} ({year})\nАннотация: {short_abstract}\n"
 
     return f"""
-Ты — ведущий академический консультант и эксперт по научной новизне.
+Ты — ведущий академический консультант и научный руководитель высшей квалификации.
 
 ПОЛЬЗОВАТЕЛЬСКИЙ ЗАПРОС: "{user_query}"
 
@@ -34,14 +33,31 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
 
 ТВОЯ ЗАДАЧА:
 1. Проанализируй представленные выше статьи.
-2. Найди "исследовательские лакуны" (Research Gaps) — темы, ракурсы или междисциплинарные стыки, которые ещё НЕ раскрыты или слабо освещены в этих работах.
-3. Сформулируй 3 УНИКАЛЬНЫЕ, узкосфокусированные и академически строгие темы для будущих статей.
+2. Найди исследовательские лакуны (Research Gaps) — ракурсы, проблемы или междисциплинарные стыки, слабо освещенные в текущих работах.
+3. Сформулируй 3 УНИКАЛЬНЫЕ, глубокие и академически строгие темы для будущих публикаций.
 
-ТРЕБОВАНИЯ К ВЫДАЧЕ:
+ТРЕБОВАНИЯ К ФОРМАТУ ВЫДАЧИ (Соблюдай структуру строго):
+
 Для каждой из 3 тем укажи:
-- 📌 Название темы (четкое, академическое)
-- 🎯 Актуальность и новизна (почему этого нет в текущих работах)
-- 💡 Краткий план/гипотеза работы (3-4 ключевых тезиса)
+
+📌 **Тема [номер]: [Академическое название темы]**
+
+• **Актуальность и научная новизна:**
+[Подробное обоснование, почему эта проблема не раскрыта в изученных работах]
+
+• **Академическая аннотация (Abstract):**
+[Готовая расширенная аннотация исследования на 4-5 предложений]
+
+• **Ключевые слова (Keywords):**
+[5-7 ключевых терминов через запятую]
+
+• **Подробный исследовательский план:**
+1. Введение и методология: [детали]
+2. Теоретическая база и понятийный аппарат: [детали]
+3. Эмпирический / практический анализ: [детали]
+4. Научные выводы и прикладное значение: [детали]
+
+---
 """
 
 
@@ -60,12 +76,11 @@ def get_gemini_keys() -> list[str]:
 
 
 def generate_topics(user_query: str, articles: list[dict]) -> str:
-    """Пайплайн генерации с логированием ошибок и поддержкой Groq."""
+    """Генерация с фоллбэками и логированием."""
     prompt = build_analysis_prompt(user_query, articles)
     keys = get_gemini_keys()
     errors_log = []
 
-    # 1. Пробуем все ключи и модели Google Gemini
     if keys:
         for idx, api_key in enumerate(keys, 1):
             headers = {
@@ -88,7 +103,7 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                 try:
                     resp = requests.post(
-                        url, headers=headers, json=payload, timeout=30
+                        url, headers=headers, json=payload, timeout=35
                     )
                     if resp.status_code == 200:
                         data = resp.json()
@@ -97,17 +112,11 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
                         ]
                     else:
                         err_text = resp.json().get("error", {}).get("message", resp.text)
-                        errors_log.append(
-                            f"Gemini (Ключ #{idx}, {model}) -> Код {resp.status_code}: {err_text}"
-                        )
+                        errors_log.append(f"Gemini (Ключ #{idx}, {model}) -> Код {resp.status_code}: {err_text}")
                 except Exception as e:
-                    errors_log.append(
-                        f"Gemini (Ключ #{idx}, {model}) -> Исключение: {e}"
-                    )
-    else:
-        errors_log.append("Ключи Gemini (OPENAI_API_KEY) не найдены в Secrets.")
+                    errors_log.append(f"Gemini (Ключ #{idx}, {model}) -> Исключение: {e}")
 
-    # 2. Резервный канал: Groq API (Llama 3.3 70B)
+    # Резервный канал: Groq API
     if "GROQ_API_KEY" in st.secrets and st.secrets["GROQ_API_KEY"]:
         groq_key = str(st.secrets["GROQ_API_KEY"]).strip()
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -128,22 +137,17 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
         }
         try:
             resp = requests.post(
-                url, headers=headers, json=payload, timeout=30
+                url, headers=headers, json=payload, timeout=35
             )
             if resp.status_code == 200:
                 return resp.json()["choices"][0]["message"]["content"]
             else:
-                errors_log.append(
-                    f"Groq API -> Код {resp.status_code}: {resp.text}"
-                )
+                errors_log.append(f"Groq API -> Код {resp.status_code}: {resp.text}")
         except Exception as e:
             errors_log.append(f"Groq API -> Исключение: {e}")
 
-    # Если абсолютно всё упало — выводим детализацию
     formatted_errors = "\n".join([f"• {err}" for err in errors_log])
     return (
-        f"❌ **Не удалось получить ответ ни от одного из сервисов.**\n\n"
-        f"**Детали ошибок по провайдерам:**\n{formatted_errors}\n\n"
-        f"💡 **Решение проблемы раз и навсегда:**\n"
-        f"Зарегистрируйте бесплатный ключ на **[groq.com](https://console.groq.com/)** и добавьте `GROQ_API_KEY` в Secrets Streamlit. Groq выдаёт 14 400 бесплатных запросов в день и не блокирует IP-адреса облачных серверов."
+        f"❌ **Не удалось получить ответ от сервисов генерации.**\n\n"
+        f"**Детали:**\n{formatted_errors}"
     )
