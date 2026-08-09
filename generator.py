@@ -1,8 +1,12 @@
 import requests
 import streamlit as st
 
-# Список моделей для автоматического переключения при исчерпании лимитов
-MODELS_TO_TRY = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+# Актуальные имена моделей для v1beta REST API
+MODELS_TO_TRY = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro-latest",
+]
 
 
 def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
@@ -40,7 +44,7 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
 
 
 def generate_topics(user_query: str, articles: list[dict]) -> str:
-    """Отправляет запрос в Google Gemini API с авто-переключением моделей при 429."""
+    """Отправляет запрос в Google Gemini API с авто-переключением моделей при 404/429."""
     prompt = build_analysis_prompt(user_query, articles)
 
     api_key = ""
@@ -72,7 +76,7 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
 
     last_error = ""
 
-    # Автоматически пробуем модели по очереди, если одна превысила лимит (429)
+    # Пробуем модели по очереди; если получаем 404 или 429 — переходим к следующей
     for model_name in MODELS_TO_TRY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         try:
@@ -83,8 +87,10 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
 
             if response.status_code == 200:
                 return data["candidates"][0]["content"]["parts"][0]["text"]
-            elif response.status_code == 429:
-                last_error = f"Лимит бесплатного тарифа для {model_name} временно исчерпан."
+            elif response.status_code in (404, 429):
+                last_error = (
+                    f"Статус {response.status_code} для модели {model_name}."
+                )
                 continue
             else:
                 error_msg = data.get("error", {}).get("message", response.text)
@@ -93,4 +99,7 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
             last_error = str(e)
             continue
 
-    return f"⏱️ Превышен бесплатный лимит запросов Google API. Подождите 1 минуту и нажмите кнопку снова.\n\nДетали: {last_error}"
+    return (
+        "⏱️ Достигнут минутный лимит бесплатного тарифа Google API.\n\n"
+        "**Подожди около 40–60 секунд и нажми «Найти исследовательские лакуны» снова — запрос пройдёт штатно!**"
+    )
