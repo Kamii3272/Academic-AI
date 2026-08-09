@@ -1,4 +1,5 @@
 import re
+import urllib.parse
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -10,12 +11,10 @@ from fetcher import fetch_articles
 from generator import generate_topics
 from vector_engine import VectorEngine
 
-# Конфигурация страницы
 st.set_page_config(
     page_title="Academic Gap Finder", page_icon="🎓", layout="wide"
 )
 
-# Кастомный академический CSS-стиль
 st.markdown(
     """
     <style>
@@ -47,7 +46,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="main-title">Academic Gap Finder</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="main-title">Academic Gap Finder</div>', unsafe_allow_html=True
+)
 st.markdown(
     '<div class="sub-title">Аналитическая система выявления исследовательских лакун в научной литературе</div>',
     unsafe_allow_html=True,
@@ -62,7 +63,11 @@ with col1:
     )
 with col2:
     max_articles = st.number_input(
-        "Объем выборки (статей):", min_value=10, max_value=100, value=30, step=10
+        "Объем выборки (статей):",
+        min_value=10,
+        max_value=100,
+        value=30,
+        step=10,
     )
 
 if st.button("Начать аналитический поиск", type="primary"):
@@ -73,7 +78,9 @@ if st.button("Начать аналитический поиск", type="primary
             "Выполнение аналитического пайплайна...", expanded=True
         ) as status:
 
-            st.write(f"1. Выгрузка научных публикаций по запросу: '{user_query}'...")
+            st.write(
+                f"1. Выгрузка научных публикаций по запросу: '{user_query}'..."
+            )
             articles = fetch_articles(user_query, max_results=max_articles)
 
             if not articles:
@@ -83,7 +90,9 @@ if st.button("Начать аналитический поиск", type="primary
                 st.error("По вашему запросу не найдено подходящих публикаций.")
                 st.stop()
 
-            st.write(f"2. Обработано релевантных источников: **{len(articles)}**.")
+            st.write(
+                f"2. Обработано релевантных источников: **{len(articles)}**."
+            )
 
             st.write("3. Семантическая векторизация и кластеризация данных...")
             vector_db = VectorEngine()
@@ -143,11 +152,8 @@ if st.button("Начать аналитический поиск", type="primary
                     ]
                     shares = [40, 35, 25]
 
-                pie_data = pd.DataFrame(
-                    {"Вектор": labels, "Доля (%)": shares}
-                )
+                pie_data = pd.DataFrame({"Вектор": labels, "Доля (%)": shares})
 
-                # Используем надёжную цепочку явных HEX-цветов
                 fig_pie = px.pie(
                     pie_data,
                     names="Вектор",
@@ -156,7 +162,9 @@ if st.button("Начать аналитический поиск", type="primary
                     hole=0.35,
                 )
                 fig_pie.update_traces(textinfo="percent+label")
-                fig_pie.update_layout(showlegend=False, margin=dict(t=20, b=20, l=10, r=10))
+                fig_pie.update_layout(
+                    showlegend=False, margin=dict(t=20, b=20, l=10, r=10)
+                )
                 st.plotly_chart(fig_pie)
 
             with col_chart2:
@@ -189,27 +197,24 @@ if st.button("Начать аналитический поиск", type="primary
                 with st.expander(
                     f"[{i}] {art.get('title', 'Без названия')} ({art.get('year', 'N/A')})"
                 ):
-                    raw_doi = art.get("doi") or ""
-                    link_text = raw_doi if raw_doi.startswith("http") else (f"https://doi.org/{raw_doi}" if raw_doi else "Ссылка отсутствует")
-                    st.write(f"**DOI / Ссылка:** {link_text}")
-                    st.write(f"**Аннотация:** {art.get('abstract', 'Отсутствует')}")
+                    st.write(f"**Ссылка на источник:** {art.get('doi')}")
+                    st.write(
+                        f"**Аннотация:** {art.get('abstract', 'Отсутствует')}"
+                    )
 
         with tab4:
-            st.subheader(f"Реестр проанализированных публикаций ({len(articles)})")
+            st.subheader(
+                f"Реестр проанализированных публикаций ({len(articles)})"
+            )
 
             table_data = []
             for i, art in enumerate(articles, 1):
-                raw_doi = art.get("doi") or ""
-                valid_link = None
-                if raw_doi:
-                    valid_link = raw_doi if raw_doi.startswith("http") else f"https://doi.org/{raw_doi}"
-
                 table_data.append(
                     {
                         "№": i,
                         "Год": art.get("year", "N/A"),
                         "Название статьи": art.get("title", "Без названия"),
-                        "DOI / Ссылка": valid_link,
+                        "DOI / Ссылка": art.get("doi"),
                     }
                 )
 
@@ -219,7 +224,7 @@ if st.button("Начать аналитический поиск", type="primary
                 df_all,
                 column_config={
                     "DOI / Ссылка": st.column_config.LinkColumn(
-                        "DOI / Ссылка", display_text="Открыть публикацию"
+                        "DOI / Ссылка", display_text="Открыть публикацию 🔗"
                     )
                 },
                 hide_index=True,
