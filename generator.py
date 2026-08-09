@@ -1,25 +1,33 @@
+import time
 import requests
 import streamlit as st
 
-# Актуальные имена моделей для v1beta REST API
+# Рабочие имена моделей с максимальными бесплатными лимитами
 MODELS_TO_TRY = [
     "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash",
 ]
 
 
 def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
-    """Формирует академический промпт для LLM."""
+    """Формирует сжатый академический промпт для экономии токенов."""
     context = ""
     for i, art in enumerate(articles, 1):
         abstract_text = (
             art.get("abstract") or art.get("text") or "Аннотация отсутствует."
         )
         title = art.get("title", "Без названия")
-        year = art.get("year", "Год не указан")
+        year = art.get("year", "N/A")
 
-        context += f"\n--- Статья {i} ---\nНазвание: {title}\nГод: {year}\nАннотация: {abstract_text}\n"
+        # Обрезаем аннотацию до 450 символов для экономии лимита TPM
+        short_abstract = (
+            abstract_text[:450] + "..."
+            if len(abstract_text) > 450
+            else abstract_text
+        )
+
+        context += f"\n--- Статья {i} ---\nНазвание: {title} ({year})\nАннотация: {short_abstract}\n"
 
     prompt = f"""
 Ты — ведущий академический консультант и эксперт по научной новизне.
@@ -44,7 +52,7 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
 
 
 def generate_topics(user_query: str, articles: list[dict]) -> str:
-    """Отправляет запрос в Google Gemini API с авто-переключением моделей при 404/429."""
+    """Отправляет запрос в Google Gemini API с оптимизацией токенов и фоллбэками."""
     prompt = build_analysis_prompt(user_query, articles)
 
     api_key = ""
@@ -76,7 +84,7 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
 
     last_error = ""
 
-    # Пробуем модели по очереди; если получаем 404 или 429 — переходим к следующей
+    # Пробуем доступные модели по очереди
     for model_name in MODELS_TO_TRY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         try:
@@ -87,10 +95,11 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
 
             if response.status_code == 200:
                 return data["candidates"][0]["content"]["parts"][0]["text"]
-            elif response.status_code in (404, 429):
-                last_error = (
-                    f"Статус {response.status_code} для модели {model_name}."
-                )
+            elif response.status_code == 429:
+                last_error = f"429 Limit on {model_name}"
+                time.sleep(1.5)  # Короткая пауза перед переключением модели
+                continue
+            elif response.status_code == 404:
                 continue
             else:
                 error_msg = data.get("error", {}).get("message", response.text)
@@ -101,5 +110,5 @@ def generate_topics(user_query: str, articles: list[dict]) -> str:
 
     return (
         "⏱️ Достигнут минутный лимит бесплатного тарифа Google API.\n\n"
-        "**Подожди около 40–60 секунд и нажми «Найти исследовательские лакуны» снова — запрос пройдёт штатно!**"
+        "Подожди около 30–40 секунд и нажми «Найти исследовательские лакуны» снова — запрос пройдёт штатно!"
     )
