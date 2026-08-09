@@ -2,16 +2,23 @@ import time
 import requests
 import streamlit as st
 
-# Рабочие имена моделей с максимальными бесплатными лимитами
-MODELS_TO_TRY = [
+# Основные модели Gemini
+GEMINI_MODELS = [
     "gemini-2.0-flash",
     "gemini-1.5-flash-8b",
     "gemini-1.5-flash",
 ]
 
+# Резервные БЕСПЛАТНЫЕ модели из OpenRouter
+OPENROUTER_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "google/gemini-2.0-flash-lite-001:free",
+]
+
 
 def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
-    """Формирует сжатый академический промпт для экономии токенов."""
+    """Формирует сжатый академический промпт."""
     context = ""
     for i, art in enumerate(articles, 1):
         abstract_text = (
@@ -20,16 +27,15 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
         title = art.get("title", "Без названия")
         year = art.get("year", "N/A")
 
-        # Обрезаем аннотацию до 450 символов для экономии лимита TPM
+        # Жесткая обрезка до 400 символов для минимального расхода токенов
         short_abstract = (
-            abstract_text[:450] + "..."
-            if len(abstract_text) > 450
+            abstract_text[:400] + "..."
+            if len(abstract_text) > 400
             else abstract_text
         )
-
         context += f"\n--- Статья {i} ---\nНазвание: {title} ({year})\nАннотация: {short_abstract}\n"
 
-    prompt = f"""
+    return f"""
 Ты — ведущий академический консультант и эксперт по научной новизне.
 
 ПОЛЬЗОВАТЕЛЬСКИЙ ЗАПРОС: "{user_query}"
@@ -48,67 +54,125 @@ def build_analysis_prompt(user_query: str, articles: list[dict]) -> str:
 - 🎯 Актуальность и новизна (почему этого нет в текущих работах)
 - 💡 Краткий план/гипотеза работы (3-4 ключевых тезиса)
 """
-    return prompt
+
+
+def get_all_gemini_keys() -> list[str]:
+    """Собирает все доступные ключи Gemini из Secrets."""
+    keys = []
+    # Основной ключ
+    if "OPENAI_API_KEY" in st.secrets and st.secrets["OPENAI_API_KEY"]:
+        keys.append(st.secrets["OPENAI_API_KEY"].strip())
+
+    # Дополнительные ключи (если пользователь добавит их в Secrets)
+    for i in range(2, 6):
+        key_name = f"OPENAI_API_KEY_{i}"
+        if key_name in st.secrets and st.secrets[key_name]:
+            keys.append(st.secrets[key_name].strip())
+
+    return keys
+
+
+def try_gemini_api(prompt: str, keys: list[str]) -> str | None:
+    """Пробует сгенерировать ответ через все ключи и модели Gemini."""
+    for api_key in keys:
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        }
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "systemInstruction": {
+                "parts": [
+                    {
+                        "text": "Ты — ведущий академический эксперт и научный руководитель."
+                    }
+                ]
+            },
+            "generationConfig": {"temperature": 0.7},
+        }
+
+        for model in GEMINI_MODELS:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            try:
+                resp = requests.post(
+                    url, headers=headers, json=payload, timeout=45
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                elif resp.status_code == 429:
+                    # Если лимит исчерпан — пробуем следующую модель/ключ
+                    time.sleep(1)
+                    continue
+            except Exception:
+                continue
+
+    return None
+
+
+def try_openrouter_api(prompt: str) -> str | None:
+    """Резервный вызов через OpenRouter (бесплатные модели Llama/Qwen)."""
+    if "OPENROUTER_API_KEY" not in st.secrets:
+        return None
+
+    openrouter_key = st.secrets["OPENROUTER_API_KEY"].strip()
+    if not openrouter_key:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {openrouter_key}",
+        "Content-Type": "application/json",
+    }
+
+    for model in OPENROUTER_MODELS:
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Ты — ведущий академический эксперт и научный руководитель.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.7,
+        }
+
+        try:
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+        except Exception:
+            continue
+
+    return None
 
 
 def generate_topics(user_query: str, articles: list[dict]) -> str:
-    """Отправляет запрос в Google Gemini API с оптимизацией токенов и фоллбэками."""
+    """Главный пайплайн генерации с каскадным переключением."""
     prompt = build_analysis_prompt(user_query, articles)
+    gemini_keys = get_all_gemini_keys()
 
-    api_key = ""
-    try:
-        if "OPENAI_API_KEY" in st.secrets:
-            api_key = st.secrets["OPENAI_API_KEY"]
-    except Exception:
-        pass
-
-    if not api_key:
+    if not gemini_keys:
         return "⚠️ API-ключ не найден в настройках Secrets Streamlit!"
 
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key.strip(),
-    }
+    # 1. Первая линия обороны: Gemini (все ключи и модели)
+    result = try_gemini_api(prompt, gemini_keys)
+    if result:
+        return result
 
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "systemInstruction": {
-            "parts": [
-                {
-                    "text": "Ты — ведущий академический эксперт и научный руководитель."
-                }
-            ]
-        },
-        "generationConfig": {"temperature": 0.7},
-    }
+    # 2. Вторая линия обороны: OpenRouter (если подключен)
+    result_openrouter = try_openrouter_api(prompt)
+    if result_openrouter:
+        return result_openrouter
 
-    last_error = ""
-
-    # Пробуем доступные модели по очереди
-    for model_name in MODELS_TO_TRY:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-        try:
-            response = requests.post(
-                url, headers=headers, json=payload, timeout=60
-            )
-            data = response.json()
-
-            if response.status_code == 200:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            elif response.status_code == 429:
-                last_error = f"429 Limit on {model_name}"
-                time.sleep(1.5)  # Короткая пауза перед переключением модели
-                continue
-            elif response.status_code == 404:
-                continue
-            else:
-                error_msg = data.get("error", {}).get("message", response.text)
-                return f"❌ Ошибка при обращении к Gemini API ({response.status_code}): {error_msg}"
-        except Exception as e:
-            last_error = str(e)
-            continue
-
+    # 3. Если вообще всё умерло
     return (
-        "⏱️ Достигнут минутный лимит бесплатного тарифа Google API.\n\n"
-        "Подожди около 30–40 секунд и нажми «Найти исследовательские лакуны» снова — запрос пройдёт штатно!"
+        "⏱️ Все бесплатные нейросети временно перегружены параллельными запросами.\n\n"
+        "**Подождите 30 секунд и нажмите кнопку снова — лимиты сбросятся!**"
     )
