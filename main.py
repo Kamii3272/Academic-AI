@@ -1,54 +1,77 @@
-import sys
+import warnings
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
 from fetcher import fetch_articles
 from generator import generate_topics
 from vector_engine import VectorEngine
 
+warnings.filterwarnings("ignore")
 
-def run_pipeline():
-    print("=" * 60)
-    print("🎓 ACADEMIC GAP FINDER v2.0 (Vector & Semantic Search)")
-    print("=" * 60)
+app = FastAPI(title="Lacuna AI API")
 
-    # 1. Запрос от пользователя
-    user_query = input(
-        "\n🔍 Введите сферу исследования (например, 'Japanese phraseology'): "
-    ).strip()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    if not user_query:
-        print("❌ Ошибка: Тема не может быть пустой!")
-        return
 
-    # 2. Модуль сбора (fetcher) — запрашиваем 50 статей
-    print(f"\n📡 [1/3] Выгружаем 50 актуальных публикаций из OpenAlex...")
-    articles = fetch_articles(user_query, max_results=50)
+class SearchRequest(BaseModel):
+    query: str
+    max_articles: int = 30
 
+
+@app.get("/")
+def health_check():
+    return {"status": "online", "message": "Lacuna AI Backend is running"}
+
+
+@app.post("/api/analyze")
+async def analyze(req: SearchRequest):
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(
+            status_code=400, detail="Запрос не может быть пустым"
+        )
+
+    articles = fetch_articles(query, max_results=req.max_articles)
     if not articles:
-        print("⚠️ По вашему запросу не найдено подходящих статей.")
-        return
+        raise HTTPException(
+            status_code=404, detail="Публикации по запросу не найдены"
+        )
 
-    print(f"✅ Успешно скачано статей: {len(articles)}")
+    try:
+        vector_db = VectorEngine()
+        vector_db.add_articles(articles)
+        top_articles = vector_db.find_similar(query, n_results=5)
+    except Exception:
+        top_articles = articles[:5]
 
-    # 3. Векторный движок (ChromaDB)
-    print(
-        f"\n🧠 [2/3] Векторизуем статьи и строим карту смыслов в ChromaDB..."
-    )
-    vector_db = VectorEngine()
-    vector_db.add_articles(articles)
+    raw_markdown = generate_topics(query, top_articles)
 
-    # Делаем семантическую выборку самых релевантных работ
-    representative_articles = vector_db.find_similar(user_query, n_results=5)
+    years = [
+        int(a["year"]) for a in articles if str(a.get("year", "")).isdigit()
+    ]
+    year_counts = {}
+    for y in sorted(years):
+        year_counts[y] = year_counts.get(y, 0) + 1
 
-    # 4. Модуль генерации (generator)
-    print(
-        f"\n💡 [3/3] Анализируем плотность смыслов и генерируем темы через LLM..."
-    )
-    result = generate_topics(user_query, representative_articles)
+    timeline_data = [
+        {"year": str(y), "count": count} for y, count in year_counts.items()
+    ]
 
-    print("\n" + "=" * 60)
-    print(result)
-    print("=" * 60)
-
-
+    return {
+        "query": query,
+        "total_articles": len(articles),
+        "analysis_markdown": raw_markdown,
+        "top_articles": top_articles,
+        "all_articles": articles,
+        "timeline_data": timeline_data,
+    }
 if __name__ == "__main__":
     try:
         run_pipeline()
